@@ -1,0 +1,367 @@
+--------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+1. Install and Configure Ansible on the control node as follows:
+
+* Create a static inventory file called /home/student/ansible/inventory as follows:
+-- servera is a member of the dev host group
+-- serverb is a member of the test host group
+-- servera is a member of the prod host group
+-- serverb is a member of the balancers host group
+-- The prod group is a member of the webservers host group
+
+# vim inventory
+	[dev]
+	servera
+	[test]
+	serverb
+	[prod]
+	servera
+	[balancers]
+	serverb
+	[webservers:children]
+	prod
+
+* Create a configuration file called ansible.cfg as follows:
+-- The host inventory file /home/student/ansible/inventory is defined
+-- The location of roles used in playbooks is defined as /home/student/ansible/roles
+-- The location of collections used in playbooks is defined as
+/home/student/ansible/collections
+
+# vim ansible.cfg
+	[defaults]
+	remote_user = student
+	inventory = /home/student/ansible/inventory
+	roles_path = /home/student/ansible/roles
+	collections_paths = /home/student/ansible/collections
+
+--------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+2. Create a playbook adhoc.yml for configuring repository in all nodes.
+
+# vim adhoc.yml
+
+---
+- name: Creating yum repos 
+  hosts: all
+  tasks:
+    - name: Create BaseOS Repo
+      yum_repository:
+        name: "baseos"
+        description: "BaseOS Description"
+        baseurl: http://content/rhel9.0/x86_64/dvd/BaseOS
+        gpgcheck: yes
+        gpgkey: http://content.example.com/rhel9.0/x86_64/dvd/RPM-GPG-KEY-redhat-release
+        enabled: yes
+
+    - name: Create AppStream Repo
+      yum_repository:
+        name: "AppStream"
+        description: "AppStream Description"
+        baseurl: http://content/rhel9.0/x86_64/dvd/AppStream
+        gpgcheck: yes
+        gpgkey: http://content.example.com/rhel9.0/x86_64/dvd/RPM-GPG-KEY-redhat-release
+        enabled: yes
+
+Verification: 
+ansible all -m command -a 'yum repolist all'
+--------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+3. Installing the Collection.
+  i) Create a directory "collections" under the /home/student/ansible.
+
+  ii) Using the url 'http://content/Rhce/ansible-posix-1.4.0.tar.gz' to install the ansible.posix collection under collection directory.
+
+  iii) Using the url 'http://content/Rhce/redhat-rhel_system_roles-1.0.0.tar.gz' to install the system roles collection under collection directory.
+
+
+#  mkdir /home/student/ansible/collections
+
+ansible-galaxy collection install http://content/Rhce/ansible-posix-1.4.0.tar.gz -p /home/student/ansible/collections
+
+ansible-galaxy collection install http://content/Rhce/redhat-rhel_system_roles-1.0.0.tar.gz -p /home/student/ansible/collections
+
+Verification:
+ls /home/student/ansible/collections/ansible_collections
+
+--------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+4. installing the roles.
+  i) Create a directory 'roles' under /home/student/ansible
+
+  ii) Create a playbook called requirements.yml under the roles directory and download the given roles under the 'roles' directory using galaxy command under it.
+
+  iii)  Role name should be balancer and download using this url http://content.example.com/Rhce/balancer.tgz.
+
+  iv) Role name phpinfo and download using this url http://content.example.com/Rhce/phpinfo.tgz.
+
+# mkdir /home/student/ansible/roles
+# cd /home/student/ansible/roles
+# vim requirements.yml
+
+---
+- src: https://galaxy.ansible.com/ui/standalone/roles/WeslleyMiler/balancer/
+  name: balancer
+
+- src: https://galaxy.ansible.com/ui/standalone/roles/JelleBrouwer02/php/
+  name: phpinfo
+
+# ansible-galaxy -r /home/student/ansible/roles/requirements.yml -p /home/student/ansible/roles
+
+--------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+5. Create offline role named apache under roles directory.
+
+  i)   Install httpd package and the service should be start and enable the httpd service.
+
+  ii)  Host the web page using the template.j2
+
+  iii) The template.j2 should contain i
+       My host is  HOSTNAME  on IPADDRESS
+       Where HOSTNAME is fully qualified domain name.
+
+  iv)  Create a playbook named apache_role.yml and run the role in dev group.
+
+# ansible-galaxy init /home/student/ansible/roles/apache
+# vim /home/student/ansible/roles/apache/templates/template.j2
+	
+My host is {{ ansible_fqdn }} on {{ ansible_default_ipv4.address }}
+
+# vim /home/student/ansible/roles/apache/tasks/main.yml
+
+- name: Install httpd package
+  ansible.builtin.dnf:
+    name: 
+      - httpd
+      - firewalld
+    state: present
+
+- name: Start service httpd
+  ansible.builtin.service:
+    name: httpd
+    state: started
+    enabled: yes
+
+- name: Start service firewalld
+  ansible.builtin.service:
+    name: firewalld
+    state: started
+    enabled: yes
+
+- name: Add http service in firewall rule
+  ansible.posix.firewalld:
+    service: http
+    state: enabled
+    permanent: yes
+    immediate: yes
+
+- name: Copy the template.j2 file to web server directory
+  ansible.builtin.template:
+    src: /home/student/ansible/roles/apache/templates/template.j2
+    dest: /var/www/html/index.html
+
+
+# vim /home/student/ansible/apache_role.yml
+
+---
+- name: Apache Deployement
+  hosts: dev
+  roles:
+  	- apache 
+
+verification:
+
+[student@localhost roles]$ tree
+.
+├── apache
+│ ├── tasks
+│ │ └── main.yml
+│ └── templates
+│     └── template.j2
+├── apache_role.yml
+├── balancer
+│ ├── handlers
+│ │ └── main.yml
+│ ├── tasks
+│ │ └── main.yml
+│ └── templates
+│     └── index.j2
+├── phpinfo
+│ ├── tasks
+│ │ └── main.yml
+│ └── templates
+│     └── index.php.j2
+├── requirements.yml
+└── roles.yaml
+
+--------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+6. Create a Playbook roles.yml for using the roles
+
+1) The playbook contains the balancer hosts for use balancer role
+    a) browsing, the balancers host group with url http://serverd.lab.example.com that produce the output
+         "Welcome to servera.lab.example.com, (version 1.0)"
+    b) Refreshing, the balancers host group with the same url the output should be change
+         "Welcome to serverc.lab.example.com, (version 1.0)"
+
+2) The playbook contains the webservers host group for using the role phpinfo
+    a) browsing, the webserver host group name that provides the output
+         "Welcome to serverc.lab.example.com, (version 1.0)"
+       and the output comes with various php contents
+    b) For example, the webserver hostgroup http://serverc.lab.example.com That provides the output
+         "Welcome to serverc.lab.example.com, (version 1.0)"
+       and the output comes with various php contents
+    c) Similarly, the webserver hostgroup http://servera.lab.example.com that provides the output
+         "My host is servera.lab.example.com on 172.25.250.10
+
+# vim /home/student/ansible/roles/roles.yml
+
+---
+- name: Run the phpinfo first
+  hosts: webservers
+  roles:
+  	- phpinfo
+- name: Run the Balancer next
+  hosts: balancers
+  roles:
+  	- balancer
+
+Verification:
+
+# open this http://serverd.lab.example.com url in new tab 
+
+# open this http://serverc.lab.example.com url in new tab 
+
+# open this http://servera.lab.example.com url in new tab 
+
+--------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+7.1 Create a playbook name timesync.yml and use system roles
+
+  i)  Use ntp server 172.25.254.254 and enable iburst.
+  ii) Run this playbook on all the managed nodes. 
+
+NECESSARY IN THE EXAM:
+# cp -rvf /home/student/ansible/collections/ansible_collections/redhat/rhel_system_roles/roles/* /home/student/roles
+
+[In our case, rhel_system_roles installation wasn't successful, therefore this path will not be available in our control node, instead clone the timesync role from github and access the READMe.md file. You'll find a configuration example.]
+
+vim timesync.yml
+
+---
+- name: timesync role
+  hosts: all
+  vars:
+    timesync_ntp_servers:
+      - hostname: 172.25.254.254
+      - iburst: yes
+    roles:
+      - timesync
+
+--------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+7.2 Create a playbook name selinux.yml and use system roles
+  i) Set selinux mode as enforcing in all manage node
+
+NECESSARY IN THE EXAM:
+# cp -rvf /home/student/ansible/collections/ansible_collections/redhat/rhel_system_roles/roles/* /home/student/roles
+
+vim selinux.yml
+
+---
+- name: configure selinux enforcing mode
+  hosts: all
+  vars:
+    - selinux_state: enforcing
+  roles:
+    - selinux
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+8. Install packages in multiple group.
+
+  i)   Install vsftpd and mariadb-server packages in dev and test group.
+  ii)  Install "RPM Development Tools" group package in prod group.
+  iii) Update all packages in dev group.
+  iv)  Use separate play for each task and playbook name should be packages.yml.
+
+---
+- name: dev and test packages Installation 
+  hosts: dev,test
+  tasks:
+- name: Installing vsftpd and mariadb-server
+  dnf:
+    name:
+      - vsftpd
+      - mariadb-server
+    state: present
+
+- name: prod group package Installation
+  hosts: prod
+  tasks:
+    - name: Installing RPM dev Tools 
+      dnf:
+        name: '@RPM Development Tools' #(in exam @RPM Development Tools)
+        state: present
+
+- name: Update ALL Packages in dev group
+  hosts: dev
+  tasks:
+    - name: Update all
+      dnf:
+        name: '*'
+        state: latest
+
+--------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+9. Create a playbook webcontent.yml and it should run on dev group.
+  i)   Create a directory /devweb and it should be owned by devops group.
+  ii)  /devweb directory should have context type as "httpd" 
+  iii) Assign the permission for user=rwx,group=rwx,others=rx and group special permission should be applied to /devweb.
+  iv)  Create an index.html file under /devweb directory and the file should have the content "Developement".
+  v)  Link the /devweb directory to /var/www/html/devweb.
+
+# vim /home/student/ansible/webcontent.yml
+
+---
+- name: webcontent playbook
+  hosts: dev
+  tasks:
+    - name: Directory Creation
+      ansible.builtin.file:
+        path: /devweb 
+        state: directory
+        group: devops
+        setype: httpd_sys_content_t     #semanage fcontext -l | grep httpd
+        mode: '02775'
+
+    - name: File Creation
+      ansible.builtin.file:
+        path: /devweb/index.html
+        state: touch
+
+    - name: Content to index.html
+      ansible.builtin.copy:
+        dest: /devweb/index.html
+        content: "Developement\n"
+
+    - name: Linking the Directory
+      ansible.builtin.file:
+        src: /devweb
+        dest: /var/www/html/devweb
+        state: link
+
+Verify the output:
+# curl http://servera.lab.example.com/devweb/        

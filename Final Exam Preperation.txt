@@ -1,0 +1,352 @@
+Final Exam Preperation
+
+Part 1:
+# 1.0
+dnf install ansible-core python3 python3-pip    
+ansible-galaxy collection install ansible.posix -p /home/ansible/ansible/collection
+ansible-galaxy collection install community.general -p /home/ansible/ansible/collection
+
+# 1.1
+vim /etc/sudoers.d/ansible
+ansible 	ALL=(ALL)	NOPASSWD: ALL
+su - ansible
+
+Part 2:
+# 2.0
+mkdir ansible
+cd ansible
+
+# 2.1
+vim ansible.cfg 
+[defaults]
+inventory = inventory
+remote_user = ansible
+roles_path= /home/ansible/roles
+collections_path= /home/ansible/collections
+
+[privilege_escalation]
+become = true
+become_user = root
+become_method = sudo
+become_ask_pass = false
+
+# 2.2
+vim inventory 
+[prod]
+ansible4
+[dev]
+ansible1
+ansible2
+[ops:children] # Define a group named ops that has 2 sub-groups dev & prod
+dev
+prod
+
+
+Part 3:
+
+#3.0 To memorize
+
+A) Directory Creation: 
+  - name: Create a new mountpoint mp1
+    file:
+      path: /mnt/mp1
+      state: directory
+
+  - parted:
+      # DO NOT USE fstype
+
+  - filesystem:
+      fstype: ext4
+      dev: /dev/sdb1,2,3 ... # DONT USE /dev/sdb
+
+  - file:
+      path:
+      state: directory
+      mode: '777' # ALWAYS IN LVM / Partitioning  
+
+  - mount:
+      path: /srv
+      src: /dev/sdb1
+      fstype: ext4
+      state: mounted # NECESSARY
+      opts: defaults # UNNECESSARY
+
+
+
+
+B) rhel-system-roles installation
+
+# sudo dnf install rhel-system-roles -y 
+# cd /usr/share/doc/rhel-system-roles/
+# ls
+ad_integration   fapolicyd        keylime_server  podman      ssh       vpn
+bootloader       firewall         logging         postfix     sshd
+certificate      ha_cluster       metrics         postgresql  storage
+cockpit          journald         nbde_client     rhc         systemd
+collection       kdump            nbde_server     selinux     timesync
+crypto_policies  kernel_settings  network         snapshot    tlog
+
+
+C) Refresh 
+
+# vim yum-repo.sh
+
+ansible all -m yum_repository -a "name=BaseOS baseurl='file:///mnt/BaseOS/' description='Base OS Repo' gpgcheck=yes gpgkey='file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release' enabled=yes" -i inventory
+
+ansible all -m yum_repository -a "name=AppStream baseurl=file:///mnt/AppStream/ description='AppStream Repo' gpgcheck=yes gpgkey='file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release' enabled=yes" -i inventory
+
+
+...
+when: ( item.uid | string )[0] == '1'
+loop: "{{ users }}"
+...
+
+
+...
+when: item.job == 'developer'
+loop: "{{ users }}"
+...
+
+
+# dnf install rhel-system-roles -y
+# sudo cp -avr /usr/share/ansible/roles/rhel-system-roles.* /home/ansible/roles
+
+
+
+# vim requirements.yml
+
+- name: haproxy-role
+  src: geerlingguy.haproxy
+
+- name: php-role
+  src: geerlingguy.php
+
+# ansible-galaxy install -r requirements.yml -p /home/ansible/roles/
+
+
+
+# vim hosts.j2 
+127.0.0.1 localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1 localhost localhost.localdomain localhost6 localhost6.localdomain6
+{% for host in groups.all %}
+{{ hostvars[host].ansible_default_ipv4.address }} {{ hostvars[host].ansible_fqdn }} {{ hostvars[host].ansible_hostname }}
+{% endfor %}
+
+# vim hosts.yml 
+---
+- name: Playbook to apply jinja template
+  hosts: all 
+  become: true
+  tasks:
+    - name: Application
+      template:
+        src: /home/automation/plays/hosts.j2
+        dest: /root/myhosts
+      when: inventory_hostname in groups.dev 
+
+
+
+    - name: Dev Web Directory Creation
+      file:
+        path: /devweb
+        state: directory
+        group: devops   # Ensure that devops group exist on dev hosts
+        mode: '2775' # 2=g+s (GUID) 
+        setype: httpd_sys_content_t  # To memorize
+
+STICKY_BIT = 1 (o+t) (STICKY BIT) Restrict the ability to delete files within dir1
+GUID = 2 (g+s) Any new files created within dir1 inherit the group ownership of dir1
+3 = 2+1 (GUID+SUID) 
+SUID = 4 Allows users to run the file with the permissions of the file's owner
+
+
+    - get_url:
+        url: http://example.com/path/hwreport.txt
+        dest: /root/hwreport.txt
+      ignore_errors: yes
+    - copy:
+        content: |
+          HOSTNAME= {{ ansible_hostname | default('NONE') }}
+          MEMORY= {{ ansible_memtotal_mb | default('NONE')  }}
+          BIOS= {{ ansible_bios_version | default('NONE')  }}
+          CPU= {{ CPU | default('NONE') }}
+          DISK_SIZE_SDA= {{ DISK_SIZE_SDA | default('NONE') }}
+          DISK_SIZE_SDB= {{ DISK_SIZE_SDB | default('NONE') }}
+        dest: /root/hwreport.txt
+
+LVM:
+
+---
+- name: Playbook to create LVM partitions on specific hosts
+  hosts: lvm_group
+  tasks:
+      - fail: 
+          msg: "Host does NOT have /dev/sdb"
+        when: ansible_devices.sdb is not defined 
+
+      - fail:
+          msg: "ansible_vg does NOT exist"
+        when: ansible_lvm.vgs.ansible_vg is not defined
+
+    - block:
+
+      - fail:
+          msg: "Not enough space"
+        when: (ansible_lvm.vgs.ansible_vg.free_g | float) < 1.5
+
+      - lvol:
+          vg: ansible_vg
+          lv: ansible_lv
+          size: 1500
+      rescue:
+      - lvol:
+          vg: ansible_vg
+          lv: ansible_lv
+          size: 800
+
+      always:
+      - file:
+          path: /lv/
+          state: directory
+          mode: '0777'
+
+      - filesystem:
+          fstype: ext4
+          dev: /dev/ansible_vg/ansible_lv
+
+      - mount:
+          path: /lv/
+          src: /dev/ansible_vg/ansible_lv
+          fstype: ext4
+          opts: defaults
+          state: present
+
+
+ROLES:
+
+# ansible-galaxy init sample-apache
+
+# vim sample-apache/tasks/main.yml
+---
+# tasks file for sample-apache
+- name: Enable httpd
+  service:
+   name: httpd
+   state: started
+   enabled: yes
+- name: Enable firewalld
+  service: 
+   name: firewalld
+   state: started
+   enabled: yes
+- name: Allow webserver service
+  firewalld:
+   service: http
+   state: enabled
+   permanent: yes
+   immediate: yes
+- name: Create index file from index.html.j2
+  template:
+   src: index.html.j2
+   dest: /var/www/html/index.html
+  notify:
+   - restart_webservers
+
+# vim sample-apache/templates/index.html.j2
+
+Welcome to {{ ansible_fqdn }} on {{ ansible_default_ipv4.address }}
+
+
+# vim sample-apache/handlers/main.yml
+
+- name: restart_webservers
+  service:
+   name: httpd
+   state: restarted
+
+# vim /home/automation/ansible and write in apache.yml
+
+---
+- name: Install apache from apache-role 
+  hosts: webservers
+  roles: 
+   - name: sample-apache
+...
+
+
+ansible managed2 -m setup | less
+
+
+
+    - file:
+        path: /devweb
+        state: directory
+        mode: '2775'
+        setype: 'httpd_sys_content_t'
+
+
+- become: true
+  hosts: servers
+  tasks:
+    - yum:
+        name: httpd
+        state: latest
+
+    - service:
+        name: httpd
+        state: started
+        enabled: yes
+
+    - firewalld:
+        port: 82/tcp
+        state: enabled
+        permanent: true
+        immediate: true
+
+    - file:
+        dest: /web
+        state: directory
+    - copy:
+        dest: /web/index.html
+        content: "Web Server on port 82"
+
+    - lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: '^Listen'
+        line: Listen 82
+
+    - community.general.seport:
+        ports: 82
+        proto: tcp
+        setype: http_port_t
+        state: present
+
+    - lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: '^DocumentRoot'
+        line: DocumentRoot /web
+
+    - lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: '^<Directory "/var/www/html">'
+        line: <Directory "/web">
+
+    - lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: '^<Directory "/var/www">'
+        line: <Directory "/web">
+
+    - community.general.sefcontext:
+        target: '/web(/.*)?'
+        setype: httpd_sys_rw_content_t
+        state: present
+      notify: restarted
+
+    - command: "restorecon -R -v /web"
+    
+  handlers:
+    - name: restarted
+      service:
+        name: httpd
+        state: restarted
+        enabled: yes
